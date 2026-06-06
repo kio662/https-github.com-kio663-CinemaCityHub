@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: CinemaCityHub
+    env: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    healthCheckPath: /health
+    envVars:
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: DB_CHANNEL
+        sync: false
+      - key: FORCE_SUB_CHANNEL
+        sync: false
+      - key: FORCE_SUB_INVITE
+        sync: false
+      - key: ADMINS
+        sync: false
+      - key: BOT_USERNAME
+        sync: false
+      - key: SUPPORT_URL
+        sync: false
+      - key: CHANNEL_URL
+        sync: false
+      - key: REQUEST_CHANNEL
+        sync: false
+      - key: AUTO_DELETE_SECONDS
+        value: "300"
+      - key: MAX_RESULTS
+        value: "10"
+      - key: RENDER_URL
+        sync: false
