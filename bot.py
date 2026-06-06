@@ -1,12 +1,16 @@
 import asyncio
 import threading
+import sys
 
-# ── Fix: create event loop before pyrogram imports (Python 3.10+ compatibility)
-try:
-    loop = asyncio.get_event_loop()
-except RuntimeError:
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+# ── Python 3.10+ / 3.14 event loop fix — MUST be before pyrogram import ──────
+if sys.version_info >= (3, 10):
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
 from pyrogram import Client, filters
 from pyrogram.types import Message, CallbackQuery
@@ -31,7 +35,8 @@ from handlers import (
     broadcast_store,
 )
 from force_sub import is_subscribed
-from database import get_total_files, get_total_users
+from database import get_total_files, get_total_users, get_recent_files
+from lang_detector import parse_movie_info
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Client
@@ -43,7 +48,6 @@ app = Client(
     api_hash  = API_HASH,
     bot_token = BOT_TOKEN,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # COMMANDS
@@ -79,7 +83,7 @@ async def cmd_help(client: Client, message: Message):
 
 @app.on_message(filters.command("ping"))
 async def cmd_ping(client: Client, message: Message):
-    await message.reply("🏓 Pong! CinemaCityHub is alive.")
+    await message.reply("🏓 Pong! CinemaCityHub is alive and running.")
 
 
 @app.on_message(filters.command("status"))
@@ -113,9 +117,11 @@ async def cmd_request(client: Client, message: Message):
 
 @app.on_message(filters.command("myrequests"))
 async def cmd_myrequests(client: Client, message: Message):
+    from database import get_user_requests
     reqs = get_user_requests(message.from_user.id)
     if not reqs:
-        await message.reply("You haven't made any requests yet.\nUse /request Movie Name"); return
+        await message.reply("You haven't made any requests yet.\nUse /request Movie Name")
+        return
     text = "🎫 **Your Requests:**\n\n"
     for r in reqs:
         status_icon = {"pending": "⏳", "done": "✅", "rejected": "❌"}.get(r["status"], "❓")
@@ -223,19 +229,19 @@ async def on_admin_files(client, cq):
     if cq.from_user.id not in ADMINS:
         await cq.answer("❌ Not an admin!", show_alert=True); return
     recent = get_recent_files(10)
-    text   = f"📁 **Total Files: {get_total_files()}**\n\n**Recent Additions:**\n"
+    text = f"📁 **Total Files: {get_total_files()}**\n\n**Recent Additions:**\n"
     for f in recent:
         info = parse_movie_info(f["file_name"])
         text += f"🎬 {info['clean_name']} | {f.get('language','?')} | {f.get('quality','?')}\n"
-    from handlers import parse_movie_info
     await cq.message.edit_text(text, reply_markup=admin_panel_keyboard())
 
 @app.on_callback_query(filters.regex("^admin_users$"))
 async def on_admin_users(client, cq):
     if cq.from_user.id not in ADMINS:
         await cq.answer("❌ Not an admin!", show_alert=True); return
+    from database import get_recent_users
     recent = get_recent_users(10)
-    text   = f"👥 **Total Users: {get_total_users()}**\n\n**Recent Users:**\n"
+    text = f"👥 **Total Users: {get_total_users()}**\n\n**Recent Users:**\n"
     for u in recent:
         text += f"👤 {u.get('first_name','?')} | ID: `{u['user_id']}`\n"
     await cq.message.edit_text(text, reply_markup=admin_panel_keyboard())
@@ -274,29 +280,32 @@ async def on_check_sub(client, cq):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# MAIN
+# MAIN — uses app.run() for Python 3.14 compatibility
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def main():
+def main():
+    # Start keep-alive HTTP server in background thread
     threading.Thread(target=run_keep_alive, daemon=True).start()
-    asyncio.create_task(self_ping())
-
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print("  🎬  CinemaCityHub v" + BOT_VERSION + " Starting...")
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-    await app.start()
-    me = await app.get_me()
-
-    print(f"  ✅  Bot: @{me.username}")
-    print(f"  🎬  Files: {get_total_files()}")
-    print(f"  👥  Users: {get_total_users()}")
-    print(f"  🌐  Keep-alive: port 8080")
-    print(f"  🔄  Self-ping: {RENDER_URL or 'disabled'}")
+    print(f"  🎬  CinemaCityHub v{BOT_VERSION} Starting...")
+    print(f"  🐍  Python {sys.version}")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-    await asyncio.Event().wait()
+    async def start():
+        await app.start()
+        # Start self-ping after bot is running
+        asyncio.create_task(self_ping())
+        me = await app.get_me()
+        print(f"  ✅  Bot: @{me.username}")
+        print(f"  🎬  Files: {get_total_files()}")
+        print(f"  👥  Users: {get_total_users()}")
+        print(f"  🌐  Keep-alive: port 8080")
+        print(f"  🔄  Self-ping: {RENDER_URL or 'disabled (set RENDER_URL)'}")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        await asyncio.Event().wait()
+
+    app.run(start())
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
